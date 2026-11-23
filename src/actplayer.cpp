@@ -2076,42 +2076,7 @@ void Player::Ghost_t::handleGhostCameraUpdate(const bool useRefreshRateDelta)
 
 	if ( TimerExperiments::bUseTimerInterpolation )
 	{
-		while ( TimerExperiments::cameraCurrentState[player.playernum].yaw.position >= PI * 2 )
-		{
-			TimerExperiments::cameraCurrentState[player.playernum].yaw.position -= PI * 2;
-		}
-		while ( TimerExperiments::cameraCurrentState[player.playernum].yaw.position < 0 )
-		{
-			TimerExperiments::cameraCurrentState[player.playernum].yaw.position += PI * 2;
-		}
-		real_t diff = my->yaw - TimerExperiments::cameraCurrentState[player.playernum].yaw.position;
-		if ( diff > PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[player.playernum].yaw.velocity = diff * TimerExperiments::lerpFactor;
-		while ( TimerExperiments::cameraCurrentState[player.playernum].pitch.position >= PI )
-		{
-			TimerExperiments::cameraCurrentState[player.playernum].pitch.position -= PI * 2;
-		}
-		while ( TimerExperiments::cameraCurrentState[player.playernum].pitch.position < -PI )
-		{
-			TimerExperiments::cameraCurrentState[player.playernum].pitch.position += PI * 2;
-		}
-		diff = my->pitch - TimerExperiments::cameraCurrentState[player.playernum].pitch.position;
-		if ( diff >= PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[player.playernum].pitch.velocity = diff * TimerExperiments::lerpFactor;
+		TimerExperiments::setCameraTargetAngles(player.playernum, my->yaw, my->pitch);
 	}
 }
 
@@ -2540,33 +2505,9 @@ void actDeathGhost(Entity* my)
 		}
 		else
 		{
-			TimerExperiments::cameraCurrentState[playernum].x.velocity =
-				TimerExperiments::lerpFactor * (camx - TimerExperiments::cameraCurrentState[playernum].x.position);
-			TimerExperiments::cameraCurrentState[playernum].y.velocity =
-				TimerExperiments::lerpFactor * (camy - TimerExperiments::cameraCurrentState[playernum].y.position);
-			TimerExperiments::cameraCurrentState[playernum].z.velocity =
-				TimerExperiments::lerpFactor * (camz - TimerExperiments::cameraCurrentState[playernum].z.position);
-
-			real_t diff = camang - TimerExperiments::cameraCurrentState[playernum].yaw.position;
-			if ( diff > PI )
-			{
-				diff -= 2 * PI;
-			}
-			else if ( diff < -PI )
-			{
-				diff += 2 * PI;
-			}
-			TimerExperiments::cameraCurrentState[playernum].yaw.velocity = diff * TimerExperiments::lerpFactor;
-			diff = camvang - TimerExperiments::cameraCurrentState[playernum].pitch.position;
-			if ( diff >= PI )
-			{
-				diff -= 2 * PI;
-			}
-			else if ( diff < -PI )
-			{
-				diff += 2 * PI;
-			}
-			TimerExperiments::cameraCurrentState[playernum].pitch.velocity = diff * TimerExperiments::lerpFactor;
+			TimerExperiments::setCameraTargetPos(playernum, camx, camy);
+			TimerExperiments::setCameraTargetZ(playernum, camz);
+			TimerExperiments::setCameraTargetAngles(playernum, camang, camvang);
 		}
 	}
 
@@ -3224,33 +3165,9 @@ void actProjectSpiritCam(Entity* my)
 	}
 	else
 	{
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].x.velocity =
-			TimerExperiments::lerpFactor * (camx - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].x.position);
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].y.velocity =
-			TimerExperiments::lerpFactor * (camy - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].y.position);
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].z.velocity =
-			TimerExperiments::lerpFactor * (camz - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].z.position);
-
-		real_t diff = camang - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].yaw.position;
-		if ( diff > PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].yaw.velocity = diff * TimerExperiments::lerpFactor;
-		diff = camvang - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].pitch.position;
-		if ( diff >= PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].pitch.velocity = diff * TimerExperiments::lerpFactor;
+		TimerExperiments::setCameraTargetPos(DEATHCAM_PLAYERNUM, camx, camy);
+		TimerExperiments::setCameraTargetZ(DEATHCAM_PLAYERNUM, camz);
+		TimerExperiments::setCameraTargetAngles(DEATHCAM_PLAYERNUM, camang, camvang);
 	}
 }
 
@@ -3531,33 +3448,9 @@ void actDeathCam(Entity* my)
 	}
 	else
 	{
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].x.velocity = 
-			TimerExperiments::lerpFactor * (camx - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].x.position);
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].y.velocity = 
-			TimerExperiments::lerpFactor * (camy - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].y.position);
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].z.velocity = 
-			TimerExperiments::lerpFactor * (camz - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].z.position);
-
-		real_t diff = camang - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].yaw.position;
-		if ( diff > PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].yaw.velocity = diff * TimerExperiments::lerpFactor;
-		diff = camvang - TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].pitch.position;
-		if ( diff >= PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[DEATHCAM_PLAYERNUM].pitch.velocity = diff * TimerExperiments::lerpFactor;
+		TimerExperiments::setCameraTargetPos(DEATHCAM_PLAYERNUM, camx, camy);
+		TimerExperiments::setCameraTargetZ(DEATHCAM_PLAYERNUM, camz);
+		TimerExperiments::setCameraTargetAngles(DEATHCAM_PLAYERNUM, camang, camvang);
 	}
 }
 
@@ -3623,12 +3516,19 @@ bool Player::PlayerMovement_t::isPlayerSwimming()
 	return swimming;
 }
 
+static bool s_playerDoingQuickTurn[MAXPLAYERS] = { false };
+bool isPlayerDoingQuickTurn(int player)
+{
+	return player >= 0 && player < MAXPLAYERS && s_playerDoingQuickTurn[player];
+}
+
 bool Player::PlayerMovement_t::handleQuickTurn(bool useRefreshRateDelta)
 {
 	if ( !players[player.playernum]->entity || !bDoingQuickTurn )
 	{
 		quickTurnRotation = 0.0;
 		bDoingQuickTurn = false;
+		s_playerDoingQuickTurn[player.playernum] = false;
 		quickTurnStartTicks = 0;
 		return false;
 	}
@@ -3695,11 +3595,13 @@ bool Player::PlayerMovement_t::handleQuickTurn(bool useRefreshRateDelta)
 		{
 			quickTurnRotation = std::min(0.0, quickTurnRotation - PLAYER_ROTX * refreshRateDelta);
 		}
+		s_playerDoingQuickTurn[player.playernum] = true;
 		return true;
 	}
 	else
 	{
 		bDoingQuickTurn = false;
+		s_playerDoingQuickTurn[player.playernum] = false;
 		return false;
 	}
 }
@@ -3726,6 +3628,7 @@ void Player::PlayerMovement_t::startQuickTurn()
 
 	quickTurnStartTicks = players[PLAYER_NUM]->entity->ticks;
 	bDoingQuickTurn = true;
+	s_playerDoingQuickTurn[player.playernum] = true;
 	// code for moving left -> turn left, moving right -> turn right
 	// maybe better for 1 direction only.
 	/*if ( abs(PLAYER_VELY) > 0.001 || abs(PLAYER_VELX) > 0.001 )
@@ -4006,42 +3909,7 @@ void Player::PlayerMovement_t::handlePlayerCameraUpdate(bool useRefreshRateDelta
 
 	if ( TimerExperiments::bUseTimerInterpolation )
 	{
-		while ( TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.position >= PI * 2 )
-		{
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.position -= PI * 2;
-		}
-		while ( TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.position < 0 )
-		{
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.position += PI * 2;
-		}
-		real_t diff = my->yaw - TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.position;
-		if ( diff > PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[PLAYER_NUM].yaw.velocity = diff * TimerExperiments::lerpFactor;
-		while ( TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.position >= PI )
-		{
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.position -= PI * 2;
-		}
-		while ( TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.position < -PI )
-		{
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.position += PI * 2;
-		}
-		diff = my->pitch - TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.position;
-		if ( diff >= PI )
-		{
-			diff -= 2 * PI;
-		}
-		else if ( diff < -PI )
-		{
-			diff += 2 * PI;
-		}
-		TimerExperiments::cameraCurrentState[PLAYER_NUM].pitch.velocity = diff * TimerExperiments::lerpFactor;
+		TimerExperiments::setCameraTargetAngles(PLAYER_NUM, my->yaw, my->pitch);
 	}
 }
 
@@ -4912,8 +4780,7 @@ void Player::PlayerMovement_t::handlePlayerCameraPosition(bool useRefreshRateDel
 		}
 		else
 		{
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].x.velocity = TimerExperiments::lerpFactor * (my->x / 16.0 - TimerExperiments::cameraCurrentState[PLAYER_NUM].x.position);
-			TimerExperiments::cameraCurrentState[PLAYER_NUM].y.velocity = TimerExperiments::lerpFactor * (my->y / 16.0 - TimerExperiments::cameraCurrentState[PLAYER_NUM].y.position);
+			TimerExperiments::setCameraTargetPos(PLAYER_NUM, my->x / 16.0, my->y / 16.0);
 		}
 
 		real_t cameraSetpointZ = (my->z * 2) - 2.5 + (swimming ? 1 : 0);
@@ -4995,9 +4862,7 @@ void Player::PlayerMovement_t::handlePlayerCameraPosition(bool useRefreshRateDel
 			}
 			else
 			{
-				TimerExperiments::cameraCurrentState[PLAYER_NUM].z.velocity =
-					((PLAYER_CAMERAZ_ACCEL) - TimerExperiments::cameraCurrentState[PLAYER_NUM].z.position)
-					* TimerExperiments::lerpFactor;
+				TimerExperiments::setCameraTargetZ(PLAYER_NUM, PLAYER_CAMERAZ_ACCEL);
 			}
 
 			// check updated value.
@@ -5017,9 +4882,7 @@ void Player::PlayerMovement_t::handlePlayerCameraPosition(bool useRefreshRateDel
 			}
 			else
 			{
-				TimerExperiments::cameraCurrentState[PLAYER_NUM].z.velocity = 
-					((PLAYER_CAMERAZ_ACCEL + PLAYER_BOB) - TimerExperiments::cameraCurrentState[PLAYER_NUM].z.position) 
-					* TimerExperiments::lerpFactor;
+				TimerExperiments::setCameraTargetZ(PLAYER_NUM, PLAYER_CAMERAZ_ACCEL + PLAYER_BOB);
 			}
 		}
 

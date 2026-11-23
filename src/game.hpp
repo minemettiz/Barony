@@ -646,9 +646,27 @@ public:
 	static EntityStates cameraCurrentState[MAXPLAYERS];
 	static EntityStates cameraRenderState[MAXPLAYERS];
 
+	// Low-latency / true fixed-timestep interpolation engine upgrades (MP-safe)
+	static bool bUseTrueTickLerp;
+	static bool bZeroLagMouselook;
+	static bool bHighResTimer;
+	static bool bCustomVanillaLerp;
+	static float customVanillaLerpFactor;
+	static double tickAlpha;
+	static bool cameraPosInit[MAXPLAYERS];
+	static bool cameraZInit[MAXPLAYERS];
+	static bool cameraAngInit[MAXPLAYERS];
+
 	static std::string render(State state);
 
 	static void reset();
+	static void resetCameraInterp();
+	static void onInterpolationModeChanged();
+	static void beginSimulationTick();
+	static void setCameraTargetPos(int player, real_t x, real_t y);
+	static void setCameraTargetZ(int player, real_t z);
+	static void setCameraTargetAngles(int player, real_t yaw, real_t pitch);
+	static void applyRawMouseLookFrame();
 	static void updateClocks();
 	static real_t lerpAngle(real_t angle1, real_t angle2, real_t alpha);
 	static void renderCameras(view_t& camera, int player);

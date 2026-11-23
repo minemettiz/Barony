@@ -72,6 +72,7 @@ using std::string; //Instead of including an entire namespace, please explicitly
 
 #ifdef STEAMWORKS
 #define STEAM_APPID 371970
+bool steamIsRunningOnSteamDeck();
 #endif
 
 enum ESteamStatTypes

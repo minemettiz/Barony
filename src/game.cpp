@@ -290,7 +290,281 @@ bool TimerExperiments::bUseTimerInterpolation = true;
 bool TimerExperiments::bIsInit = false;
 bool TimerExperiments::bDebug = false;
 real_t TimerExperiments::lerpFactor = 30.0;
+bool TimerExperiments::bUseTrueTickLerp = true;
+bool TimerExperiments::bZeroLagMouselook = true;
+bool TimerExperiments::bHighResTimer = true;
+bool TimerExperiments::bCustomVanillaLerp = false;
+float TimerExperiments::customVanillaLerpFactor = 55.0f;
+double TimerExperiments::tickAlpha = 1.0;
+bool TimerExperiments::cameraPosInit[MAXPLAYERS] = { false };
+bool TimerExperiments::cameraZInit[MAXPLAYERS] = { false };
+bool TimerExperiments::cameraAngInit[MAXPLAYERS] = { false };
 void preciseSleep(double seconds);
+
+#ifndef EDITOR
+extern bool disablemouserotationlimit;
+extern bool isPlayerDoingQuickTurn(int player);
+static ConsoleVariable<bool> cvar_zeroLagMouselook("/zerolag_mouselook", true, "Apply raw mouse look every render frame (zero tick/interpolation lag)");
+static ConsoleVariable<bool> cvar_trueTickLerp("/trueticklerp", true, "Use true fixed-timestep linear tick interpolation instead of 60Hz chase filter");
+static ConsoleVariable<bool> cvar_hiResTimer("/hires_timer", true, "Use microsecond SDL_GetPerformanceCounter() in main loop");
+#endif
+
+static void syncEngineFixCvars()
+{
+#ifndef EDITOR
+	TimerExperiments::bZeroLagMouselook = *cvar_zeroLagMouselook;
+	TimerExperiments::bHighResTimer = *cvar_hiResTimer;
+	bool wantTrueLerp = *cvar_trueTickLerp;
+	if ( TimerExperiments::bUseTrueTickLerp != wantTrueLerp )
+	{
+		TimerExperiments::bUseTrueTickLerp = wantTrueLerp;
+		TimerExperiments::onInterpolationModeChanged();
+	}
+#endif
+}
+
+void TimerExperiments::resetCameraInterp()
+{
+	for ( int i = 0; i < MAXPLAYERS; ++i )
+	{
+		cameraPosInit[i] = false;
+		cameraZInit[i] = false;
+		cameraAngInit[i] = false;
+		cameraPreviousState[i].resetMovement();
+		cameraCurrentState[i].resetMovement();
+		cameraRenderState[i].resetMovement();
+	}
+}
+
+void TimerExperiments::onInterpolationModeChanged()
+{
+	currentTime = Clock::now();
+	accumulator = std::chrono::milliseconds{ 0 };
+	for ( int i = 0; i < MAXPLAYERS; ++i )
+	{
+		cameraCurrentState[i].resetMovement();
+		cameraPreviousState[i] = cameraCurrentState[i];
+		cameraRenderState[i] = cameraCurrentState[i];
+	}
+	if ( map.entities )
+	{
+		for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
+		{
+			Entity* entity = (Entity*)node->element;
+			if ( entity && entity->bUseRenderInterpolation )
+			{
+				entity->lerpCurrentState.resetMovement();
+				entity->lerpPreviousState = entity->lerpCurrentState;
+				entity->lerpRenderState = entity->lerpCurrentState;
+			}
+		}
+	}
+}
+
+void TimerExperiments::beginSimulationTick()
+{
+	if ( !bUseTimerInterpolation || !bUseTrueTickLerp )
+	{
+		return;
+	}
+	for ( int i = 0; i < MAXPLAYERS; ++i )
+	{
+		cameraPreviousState[i] = cameraCurrentState[i];
+	}
+}
+
+void TimerExperiments::setCameraTargetPos(int player, real_t x, real_t y)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !bUseTimerInterpolation )
+	{
+		return;
+	}
+	if ( bUseTrueTickLerp )
+	{
+		real_t dx = x - cameraCurrentState[player].x.position;
+		real_t dy = y - cameraCurrentState[player].y.position;
+		if ( !cameraPosInit[player] || (dx * dx + dy * dy) > 6.25 )
+		{
+			cameraPreviousState[player].x.position = x;
+			cameraPreviousState[player].y.position = y;
+			cameraRenderState[player].x.position = x;
+			cameraRenderState[player].y.position = y;
+			cameraPosInit[player] = true;
+		}
+		cameraCurrentState[player].x.position = x;
+		cameraCurrentState[player].y.position = y;
+		cameraCurrentState[player].x.velocity = 0.0;
+		cameraCurrentState[player].y.velocity = 0.0;
+	}
+	else
+	{
+		cameraCurrentState[player].x.velocity = lerpFactor * (x - cameraCurrentState[player].x.position);
+		cameraCurrentState[player].y.velocity = lerpFactor * (y - cameraCurrentState[player].y.position);
+	}
+}
+
+void TimerExperiments::setCameraTargetZ(int player, real_t z)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !bUseTimerInterpolation )
+	{
+		return;
+	}
+	if ( bUseTrueTickLerp )
+	{
+		if ( !cameraZInit[player] || fabs(z - cameraCurrentState[player].z.position) > 8.0 )
+		{
+			cameraPreviousState[player].z.position = z;
+			cameraRenderState[player].z.position = z;
+			cameraZInit[player] = true;
+		}
+		cameraCurrentState[player].z.position = z;
+		cameraCurrentState[player].z.velocity = 0.0;
+	}
+	else
+	{
+		cameraCurrentState[player].z.velocity = lerpFactor * (z - cameraCurrentState[player].z.position);
+	}
+}
+
+void TimerExperiments::setCameraTargetAngles(int player, real_t yaw, real_t pitch)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !bUseTimerInterpolation )
+	{
+		return;
+	}
+	if ( bUseTrueTickLerp )
+	{
+		if ( !cameraAngInit[player] )
+		{
+			cameraPreviousState[player].yaw.position = yaw;
+			cameraPreviousState[player].pitch.position = pitch;
+			cameraRenderState[player].yaw.position = yaw;
+			cameraRenderState[player].pitch.position = pitch;
+			cameraAngInit[player] = true;
+		}
+		cameraCurrentState[player].yaw.position = yaw;
+		cameraCurrentState[player].pitch.position = pitch;
+		cameraCurrentState[player].yaw.velocity = 0.0;
+		cameraCurrentState[player].pitch.velocity = 0.0;
+	}
+	else
+	{
+		while ( cameraCurrentState[player].yaw.position >= PI * 2 )
+		{
+			cameraCurrentState[player].yaw.position -= PI * 2;
+		}
+		while ( cameraCurrentState[player].yaw.position < 0 )
+		{
+			cameraCurrentState[player].yaw.position += PI * 2;
+		}
+		real_t diff = yaw - cameraCurrentState[player].yaw.position;
+		if ( diff > PI )
+		{
+			diff -= 2 * PI;
+		}
+		else if ( diff < -PI )
+		{
+			diff += 2 * PI;
+		}
+		cameraCurrentState[player].yaw.velocity = diff * lerpFactor;
+
+		while ( cameraCurrentState[player].pitch.position >= PI )
+		{
+			cameraCurrentState[player].pitch.position -= PI * 2;
+		}
+		while ( cameraCurrentState[player].pitch.position < -PI )
+		{
+			cameraCurrentState[player].pitch.position += PI * 2;
+		}
+		diff = pitch - cameraCurrentState[player].pitch.position;
+		if ( diff >= PI )
+		{
+			diff -= 2 * PI;
+		}
+		else if ( diff < -PI )
+		{
+			diff += 2 * PI;
+		}
+		cameraCurrentState[player].pitch.velocity = diff * lerpFactor;
+	}
+}
+
+static bool canUseZeroLagMouselookForPlayer(int player)
+{
+#ifdef EDITOR
+	return false;
+#else
+	if ( !TimerExperiments::bZeroLagMouselook ) { return false; }
+	if ( player != clientnum || intro || !initialized || loading || gamePaused ) { return false; }
+#ifdef USE_IMGUI
+	if ( ImGui_t::isInit && ImGui_t::disablePlayerControl ) { return false; }
+#endif
+	if ( !players[player] || !players[player]->isLocalPlayer() || !players[player]->entity ) { return false; }
+	if ( !stats[player] || stats[player]->HP <= 0 ) { return false; }
+	if ( !players[player]->shootmode || !players[player]->bControlEnabled || players[player]->usingCommand() ) { return false; }
+	if ( isPlayerDoingQuickTurn(player) ) { return false; }
+	if ( !inputs.bPlayerUsingKeyboardControl(player) ) { return false; }
+	if ( inputs.getVirtualMouse(player)->lastMovementFromController ) { return false; }
+	if ( playerSettings[multiplayer ? 0 : player].smoothmouse ) { return false; }
+	Entity* my = players[player]->entity;
+	if ( !my->isMobile() ) { return false; }
+	if ( my->skill[3] != 0 ) { return false; } // debug cam or project spirit
+	if ( my->skill[15] != 0 ) { return false; } // automaton death animation
+	return true;
+#endif
+}
+
+void TimerExperiments::applyRawMouseLookFrame()
+{
+#ifndef EDITOR
+	if ( !canUseZeroLagMouselookForPlayer(clientnum) )
+	{
+		return;
+	}
+	if ( mousexrel == 0 && mouseyrel == 0 )
+	{
+		return;
+	}
+
+	Entity* my = players[clientnum]->entity;
+	const bool reversemouse = playerSettings[multiplayer ? 0 : clientnum].reversemouse;
+	const real_t mouse_speed = playerSettings[multiplayer ? 0 : clientnum].mousespeed;
+	const bool confused = stats[clientnum]->getEffectActive(EFF_CONFUSED) != 0;
+
+	real_t rotX = (real_t)mousexrel * 0.01 * (mouse_speed / 128.0);
+	if ( !disablemouserotationlimit )
+	{
+		rotX = std::max<real_t>(-0.35, std::min<real_t>(0.35, rotX));
+	}
+	if ( confused ) { rotX = -rotX; }
+
+	my->yaw += rotX;
+	while ( my->yaw >= PI * 2 ) { my->yaw -= PI * 2; }
+	while ( my->yaw < 0 ) { my->yaw += PI * 2; }
+
+	real_t rotY = (real_t)mouseyrel * 0.01 * (mouse_speed / 128.0) * (reversemouse ? 1.0 : -1.0);
+	rotY = std::max<real_t>(-0.35, std::min<real_t>(0.35, rotY));
+	if ( confused ) { rotY = -rotY; }
+
+	my->pitch -= rotY;
+	const real_t pitchLimit = PI / 3.0;
+	if ( my->pitch > pitchLimit ) { my->pitch = pitchLimit; }
+	if ( my->pitch < -pitchLimit ) { my->pitch = -pitchLimit; }
+
+	// Keep interpolated angle states snapped so switching to QuickTurn or Vanilla Lerp never jumps
+	my->lerpPreviousState.yaw.position = my->yaw;
+	my->lerpCurrentState.yaw.position = my->yaw;
+	my->lerpRenderState.yaw.position = my->yaw;
+	my->lerpCurrentState.yaw.velocity = 0.0;
+	my->lerpPreviousState.pitch.position = my->pitch;
+	my->lerpCurrentState.pitch.position = my->pitch;
+	my->lerpRenderState.pitch.position = my->pitch;
+	my->lerpCurrentState.pitch.velocity = 0.0;
+
+	mousexrel = 0;
+	mouseyrel = 0;
+#endif
+}
 
 void TimerExperiments::integrate(TimerExperiments::State& state,
 	std::chrono::time_point<Clock, std::chrono::duration<double>>,
@@ -345,6 +619,33 @@ void TimerExperiments::updateEntityInterpolationPosition(Entity* entity)
 		return;
 	}
 
+	if ( bUseTrueTickLerp )
+	{
+		real_t nx = entity->x / 16.0;
+		real_t ny = entity->y / 16.0;
+		real_t dx = nx - entity->lerpCurrentState.x.position;
+		real_t dy = ny - entity->lerpCurrentState.y.position;
+		bool teleported = (dx * dx + dy * dy > 6.25) || (fabs(entity->z - entity->lerpCurrentState.z.position) > 16.0);
+
+		if ( !teleported )
+		{
+			entity->lerpPreviousState = entity->lerpCurrentState;
+		}
+		entity->lerpCurrentState.x.position = nx;
+		entity->lerpCurrentState.y.position = ny;
+		entity->lerpCurrentState.z.position = entity->z;
+		entity->lerpCurrentState.yaw.position = entity->yaw;
+		entity->lerpCurrentState.pitch.position = entity->pitch;
+		entity->lerpCurrentState.roll.position = entity->roll;
+		entity->lerpCurrentState.resetMovement();
+		if ( teleported )
+		{
+			entity->lerpPreviousState = entity->lerpCurrentState;
+			entity->lerpRenderState = entity->lerpCurrentState;
+		}
+		return;
+	}
+
 	entity->lerpCurrentState.x.velocity = TimerExperiments::lerpFactor * (entity->x / 16.0 - entity->lerpCurrentState.x.position);
 	entity->lerpCurrentState.y.velocity = TimerExperiments::lerpFactor * (entity->y / 16.0 - entity->lerpCurrentState.y.position);
 	entity->lerpCurrentState.z.velocity = TimerExperiments::lerpFactor * (entity->z - entity->lerpCurrentState.z.position);
@@ -384,8 +685,19 @@ void TimerExperiments::updateEntityInterpolationPosition(Entity* entity)
 
 void TimerExperiments::renderCameras(view_t& camera, int player)
 {
+	bool applyZeroLagAngles = canUseZeroLagMouselookForPlayer(player)
+		&& Input::inputs[player].analog("Turn Right") == 0.f
+		&& Input::inputs[player].analog("Turn Left") == 0.f
+		&& Input::inputs[player].analog("Look Up") == 0.f
+		&& Input::inputs[player].analog("Look Down") == 0.f;
+
 	if ( !bUseTimerInterpolation )
 	{
+		if ( applyZeroLagAngles && players[player]->entity )
+		{
+			camera.ang = players[player]->entity->yaw;
+			camera.vang = players[player]->entity->pitch;
+		}
 		return;
 	}
 
@@ -437,8 +749,16 @@ void TimerExperiments::renderCameras(view_t& camera, int player)
 			{
 				camera.x = players[player]->entity->lerpRenderState.x.position;
 				camera.y = players[player]->entity->lerpRenderState.y.position;
-				camera.ang = players[player]->entity->lerpRenderState.yaw.position;
-				camera.vang = players[player]->entity->lerpRenderState.pitch.position;
+				if ( applyZeroLagAngles )
+				{
+					camera.ang = players[player]->entity->yaw;
+					camera.vang = players[player]->entity->pitch;
+				}
+				else
+				{
+					camera.ang = players[player]->entity->lerpRenderState.yaw.position;
+					camera.vang = players[player]->entity->lerpRenderState.pitch.position;
+				}
 
 				camera.z = TimerExperiments::cameraRenderState[player].z.position; // this uses PLAYER_CAMERAZ_ACCEL, not entity Z
 			}
@@ -577,6 +897,7 @@ void TimerExperiments::reset()
 
 void TimerExperiments::updateClocks()
 {
+	syncEngineFixCvars();
 	if ( !bUseTimerInterpolation )
 	{
 		bIsInit = false;
@@ -589,99 +910,115 @@ void TimerExperiments::updateClocks()
 		bIsInit = true;
 	}
 
-	static ConsoleVariable<bool> cvar_frameLagCheck("/framelagcheck", false);
-	if ( *cvar_frameLagCheck )
-	{
-		static Uint32 doneTick = 0;
-		if ( doneTick != ticks && ticks % (2 * TICKS_PER_SECOND) == 0 )
-		{
-			doneTick = ticks;
-			auto microseconds = std::chrono::microseconds((Uint64)(300000));
-			preciseSleep(microseconds.count() / 1e6);
-		}
-	}
-
-	static ConsoleVariable<int> cvar_frameTime("/frametimelimit", 32);
-	static ConsoleVariable<bool> cvar_frameTimeAutoSet("/frametimeautolimit", true);
-	int frameTimeLimit = (*cvar_frameTime);
-	if ( *cvar_frameTimeAutoSet )
-	{
-		real_t decimal = 0.0;
-		real_t ms = 1000 / fpsLimit;
-		if ( fps > 0.0 )
-		{
-			ms = 1000 / fps;
-		}
-		frameTimeLimit = ms;
-		if ( modf(ms, &decimal) > 0.01 )
-		{
-			frameTimeLimit += 1;
-		}
-	}
-
-	static ConsoleVariable<float> cvar_cameraLerpFactor("/cameralerp", 30.0);
-	lerpFactor = (*cvar_cameraLerpFactor);
-
-	static ConsoleVariable<bool> cvar_lerpAutoAdjust("/autocameralerp", true);
-
-	time_point newTime = Clock::now();
-	auto frameTime = newTime - currentTime;
-	if ( frameTime > std::chrono::milliseconds{ frameTimeLimit } )
-	{
-		frameTime = std::chrono::milliseconds{ frameTimeLimit };
-	}
-
-	currentTime = newTime;
-	accumulator += frameTime;
-
-	if ( (*cvar_lerpAutoAdjust) )
-	{
-		int frameTimeMillis = std::chrono::duration_cast<Clock::duration>(frameTime).count();
-		real_t approxFPS = 1000.0 / frameTimeMillis;
-		lerpFactor = 30.0;
-		if ( approxFPS < 32.0 )
-		{
-			lerpFactor = std::max(1, (int)approxFPS - 2);
-		}
-	}
-
 	std::vector<Entity*> entitiesToInterpolate;
-	for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
+	if ( map.entities )
 	{
-		Entity* entity = (Entity*)node->element;
-		if ( entity->bUseRenderInterpolation )
+		for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
 		{
-			entitiesToInterpolate.push_back(entity);
+			Entity* entity = (Entity*)node->element;
+			if ( entity && entity->bUseRenderInterpolation )
+			{
+				entitiesToInterpolate.push_back(entity);
+			}
 		}
 	}
 
-	while ( accumulator >= dt )
+	double alpha = 1.0;
+	if ( bUseTrueTickLerp )
 	{
-		for ( int i = 0; i < MAXPLAYERS; ++i )
+		alpha = std::max(0.0, std::min(1.0, tickAlpha));
+	}
+	else
+	{
+		static ConsoleVariable<bool> cvar_frameLagCheck("/framelagcheck", false);
+		if ( *cvar_frameLagCheck )
 		{
-			cameraPreviousState[i] = cameraCurrentState[i];
-			integrate(cameraCurrentState[i].x, timepoint, dt);
-			integrate(cameraCurrentState[i].y, timepoint, dt);
-			integrate(cameraCurrentState[i].z, timepoint, dt);
-			integrate(cameraCurrentState[i].yaw, timepoint, dt);
-			integrate(cameraCurrentState[i].pitch, timepoint, dt);
-			integrate(cameraCurrentState[i].roll, timepoint, dt);
+			static Uint32 doneTick = 0;
+			if ( doneTick != ticks && ticks % (2 * TICKS_PER_SECOND) == 0 )
+			{
+				doneTick = ticks;
+				auto microseconds = std::chrono::microseconds((Uint64)(300000));
+				preciseSleep(microseconds.count() / 1e6);
+			}
 		}
-		for ( auto& entity : entitiesToInterpolate )
+
+		static ConsoleVariable<int> cvar_frameTime("/frametimelimit", 32);
+		static ConsoleVariable<bool> cvar_frameTimeAutoSet("/frametimeautolimit", true);
+		int frameTimeLimit = (*cvar_frameTime);
+		if ( *cvar_frameTimeAutoSet )
 		{
-			entity->lerpPreviousState = entity->lerpCurrentState;
-			integrate(entity->lerpCurrentState.x, timepoint, dt);
-			integrate(entity->lerpCurrentState.y, timepoint, dt);
-			integrate(entity->lerpCurrentState.z, timepoint, dt);
-			integrate(entity->lerpCurrentState.yaw, timepoint, dt);
-			integrate(entity->lerpCurrentState.pitch, timepoint, dt);
-			integrate(entity->lerpCurrentState.roll, timepoint, dt);
+			real_t decimal = 0.0;
+			real_t ms = 1000 / fpsLimit;
+			if ( fps > 0.0 )
+			{
+				ms = 1000 / fps;
+			}
+			frameTimeLimit = ms;
+			if ( modf(ms, &decimal) > 0.01 )
+			{
+				frameTimeLimit += 1;
+			}
 		}
-		timepoint += dt;
-		accumulator -= dt;
+
+		static ConsoleVariable<float> cvar_cameraLerpFactor("/cameralerp", 30.0);
+		lerpFactor = (*cvar_cameraLerpFactor);
+
+		static ConsoleVariable<bool> cvar_lerpAutoAdjust("/autocameralerp", true);
+
+		time_point newTime = Clock::now();
+		auto frameTime = newTime - currentTime;
+		if ( frameTime > std::chrono::milliseconds{ frameTimeLimit } )
+		{
+			frameTime = std::chrono::milliseconds{ frameTimeLimit };
+		}
+
+		currentTime = newTime;
+		accumulator += frameTime;
+
+		if ( bCustomVanillaLerp )
+		{
+			lerpFactor = std::max(5.0f, std::min(58.0f, customVanillaLerpFactor));
+		}
+		else if ( (*cvar_lerpAutoAdjust) )
+		{
+			int frameTimeMillis = std::chrono::duration_cast<Clock::duration>(frameTime).count();
+			real_t approxFPS = frameTimeMillis > 0 ? (1000.0 / frameTimeMillis) : 60.0;
+			lerpFactor = 30.0;
+			if ( approxFPS < 32.0 )
+			{
+				lerpFactor = std::max(1, (int)approxFPS - 2);
+			}
+		}
+
+		while ( accumulator >= dt )
+		{
+			for ( int i = 0; i < MAXPLAYERS; ++i )
+			{
+				cameraPreviousState[i] = cameraCurrentState[i];
+				integrate(cameraCurrentState[i].x, timepoint, dt);
+				integrate(cameraCurrentState[i].y, timepoint, dt);
+				integrate(cameraCurrentState[i].z, timepoint, dt);
+				integrate(cameraCurrentState[i].yaw, timepoint, dt);
+				integrate(cameraCurrentState[i].pitch, timepoint, dt);
+				integrate(cameraCurrentState[i].roll, timepoint, dt);
+			}
+			for ( auto& entity : entitiesToInterpolate )
+			{
+				entity->lerpPreviousState = entity->lerpCurrentState;
+				integrate(entity->lerpCurrentState.x, timepoint, dt);
+				integrate(entity->lerpCurrentState.y, timepoint, dt);
+				integrate(entity->lerpCurrentState.z, timepoint, dt);
+				integrate(entity->lerpCurrentState.yaw, timepoint, dt);
+				integrate(entity->lerpCurrentState.pitch, timepoint, dt);
+				integrate(entity->lerpCurrentState.roll, timepoint, dt);
+			}
+			timepoint += dt;
+			accumulator -= dt;
+		}
+
+		alpha = std::chrono::duration<double>{ accumulator } / dt;
 	}
 
-	double alpha = std::chrono::duration<double>{ accumulator } / dt;
 	for ( int i = 0; i < MAXPLAYERS; ++i )
 	{
 		cameraRenderState[i] = cameraCurrentState[i] * alpha + cameraPreviousState[i] * (1.0 - alpha);
@@ -700,12 +1037,6 @@ void TimerExperiments::updateClocks()
 		cameraRenderState[i].yaw.normalize(0, 2 * PI);
 		cameraRenderState[i].roll.normalize(0, 2 * PI);
 		cameraRenderState[i].pitch.normalize(0, 2 * PI);
-
-		// original angle lerp code
-		//real_t a1 = cameraPreviousState[i].yaw.position;
-		//real_t a2 = cameraCurrentState[i].yaw.position;
-		//real_t adiff = a2 - a1;
-		//cameraRenderState[i].yaw.position = a1 + alpha * (fmod(3 * PI + fmod(adiff, 2 * PI), 2 * PI) - PI);
 	}
 	for ( auto& entity : entitiesToInterpolate )
 	{
@@ -4102,12 +4433,26 @@ bool handleEvents(void)
 	int runtimes = 0;
 
 	// calculate app rate
+	syncEngineFixCvars();
 	t = SDL_GetTicks();
 	if (ot == 0.0) {
 		ot = t;
 	}
 	real_t timesync = t - ot;
 	ot = t;
+
+	static Uint64 lastPerfCounter = 0;
+	Uint64 perfNow = SDL_GetPerformanceCounter();
+	Uint64 perfFreq = SDL_GetPerformanceFrequency();
+	if ( lastPerfCounter != 0 && perfFreq > 0 && TimerExperiments::bHighResTimer )
+	{
+		real_t hiResMs = (real_t)(perfNow - lastPerfCounter) * 1000.0 / (real_t)perfFreq;
+		if ( hiResMs >= 0.0 )
+		{
+			timesync = hiResMs;
+		}
+	}
+	lastPerfCounter = perfNow;
 
 #ifdef DEBUG_EVENT_TIMERS
 	auto time1 = std::chrono::high_resolution_clock::now();
@@ -4138,6 +4483,7 @@ bool handleEvents(void)
 		//printlog("dropped %d frames", numframes - max_frames);
 		numframes = max_frames;
 	}
+	TimerExperiments::tickAlpha = std::max(0.0, std::min(1.0, (double)time_diff / (double)frame));
 
 	// calculate fps
 	if ( timesync != 0 )
@@ -5043,7 +5389,7 @@ bool handleEvents(void)
 				}
 #ifdef STEAMWORKS
                 // on steam deck, player 1 always needs a controller.
-                if (SteamUtils()->IsSteamRunningOnSteamDeck()) {
+                if (steamIsRunningOnSteamDeck()) {
                     if (id >= 0 && !inputs.hasController(0)) {
                         bindControllerToPlayer(id, 0);
                     }
@@ -5306,10 +5652,17 @@ bool handleEvents(void)
 	time1 = std::chrono::high_resolution_clock::now();
 #endif
 
+	TimerExperiments::applyRawMouseLookFrame();
+	if ( intro )
+	{
+		TimerExperiments::resetCameraInterp();
+	}
+
 	for (int runtimes = 0; runtimes < numframes; ++runtimes)
 	{
 		if (!loading && initialized)
 		{
+			TimerExperiments::beginSimulationTick();
 			gameLogic();
 			++ticks;
 		}

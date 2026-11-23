@@ -198,6 +198,70 @@ void CSteamWorkshop::StoreResultMessage(std::string message, EResult result)
 	LastActionResult.creationTick = ticks;
 }
 
+template <typename T, typename = void>
+struct HasIsSteamRunningOnSteamDeck : std::false_type {};
+
+template <typename T>
+struct HasIsSteamRunningOnSteamDeck<T, std::void_t<decltype(std::declval<T*>()->IsSteamRunningOnSteamDeck())>> : std::true_type {};
+
+template <typename UtilsT>
+static bool steamIsRunningOnSteamDeckImpl(UtilsT* utils)
+{
+	if constexpr ( HasIsSteamRunningOnSteamDeck<UtilsT>::value )
+	{
+		return utils->IsSteamRunningOnSteamDeck();
+	}
+	else
+	{
+		return utils->IsRunningOnSteamHardware() == k_ESteamHardwareTypeSteamDeck;
+	}
+}
+
+bool steamIsRunningOnSteamDeck()
+{
+	return SteamUtils() ? steamIsRunningOnSteamDeckImpl(SteamUtils()) : false;
+}
+
+template <typename T, typename = void>
+struct HasRequestCurrentStats : std::false_type {};
+
+template <typename T>
+struct HasRequestCurrentStats<T, std::void_t<decltype(std::declval<T*>()->RequestCurrentStats())>> : std::true_type {};
+
+template <typename StatsT>
+static bool steamRequestCurrentStatsImpl(StatsT* userStats, SteamStat_t* pStats, int iNumStats, bool& bInitialized)
+{
+	if constexpr ( HasRequestCurrentStats<StatsT>::value )
+	{
+		(void)pStats;
+		(void)iNumStats;
+		(void)bInitialized;
+		return userStats->RequestCurrentStats();
+	}
+	else
+	{
+		// Steamworks SDK 1.61+ syncs user stats automatically before launch
+		for ( int iStat = 0; iStat < iNumStats; ++iStat )
+		{
+			SteamStat_t &stat = pStats[iStat];
+			switch ( stat.m_eStatType )
+			{
+				case STEAM_STAT_INT:
+					userStats->GetStat(stat.m_pchStatName, &stat.m_iValue);
+					break;
+				case STEAM_STAT_FLOAT:
+				case STEAM_STAT_AVGRATE:
+					userStats->GetStat(stat.m_pchStatName, &stat.m_flValue);
+					break;
+				default:
+					break;
+			}
+		}
+		bInitialized = true;
+		return true;
+	}
+}
+
 bool CSteamStatistics::RequestStats()
 {
 	// Is Steam loaded? If not we can't get stats.
@@ -210,8 +274,7 @@ bool CSteamStatistics::RequestStats()
 	{
 		return false;
 	}
-	// Request user stats.
-	return SteamUserStats()->RequestCurrentStats();
+	return steamRequestCurrentStatsImpl(SteamUserStats(), m_pStats, m_iNumStats, m_bInitialized);
 }
 
 bool CSteamStatistics::RequestGlobalStats()
